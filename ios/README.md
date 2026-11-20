@@ -12,6 +12,8 @@ A companion for a WHOOP 5.0 already connected to the iPhone. Start after a count
 6. In **Ring until dismissed** mode, the app repeats until it sees a live double-tap, you tap **Stop**, the connection is lost, or its selected maximum runtime is reached. To check for tap support, open **Strap** after testing vibration, double-tap the top of the sensor, and look for **Double-tap detected**. Double-tap dismissal on the target sensor has yet to be verified.
 7. After testing, check that the official WHOOP app still syncs.
 
+**Native Burst** asks the strap to repeat its own waveform within a single Bluetooth command. It uses the documented Maverick repeat field and the same waveform as the regular pulse. It does not set a higher motor intensity. The first test requests one short burst. Select it for a run only if you feel several quick pulses and tap **I felt a quick burst**. Confirm it again after disconnecting and reconnecting.
+
 The iPhone companion attaches to the existing iOS connection. The WHOOP app and the timer have separate purposes, and coexistence during a run still needs a target-device check. The Swift protocol sends the verified one-shot command and waits for a final reply before the next pulse. If the strap declines a fast pulse, the timer enforces at least 1.5 seconds between pulses for the rest of that run. A further refusal stops the timer and retains the connection. The app listens for fresh strap tap events through the WHOOP notification characteristic.
 
 ## Build and install

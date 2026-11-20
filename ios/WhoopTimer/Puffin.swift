@@ -9,8 +9,10 @@ enum Puffin {
                              0x23, 1, 0x91, 1, 0x36, 0x3e, 0x5c, 0x8d])
     static let haptic: UInt8 = 0x13
 
-    static func buzz(sequence: UInt8) -> Data {
-        let inner: [UInt8] = [35, sequence, haptic, 1, 47, 152] + Array(repeating: 0, count: 10)
+    static func buzz(sequence: UInt8, nativeBurst: Bool = false) -> Data {
+        // The last body byte requests repeat effects on the strap. The second byte here is frame padding.
+        let tail: [UInt8] = [nativeBurst ? 2 : 0, 0]
+        let inner: [UInt8] = [35, sequence, haptic, 1, 47, 152] + Array(repeating: 0, count: 8) + tail
         var frame: [UInt8] = [0xaa, 1, 20, 0, 0, 1]
         let headerCRC = crc16(frame)
         frame += [UInt8(truncatingIfNeeded: headerCRC), UInt8(headerCRC >> 8)]

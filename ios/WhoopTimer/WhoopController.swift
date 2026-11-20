@@ -5,8 +5,8 @@ import Foundation
 
 @MainActor
 final class WhoopController: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeripheralDelegate {
-    enum Activity: Equatable { case idle, testing, countdown, vibrating, preview }
-    private enum Expected: Equatable { case hello, subscription, pulse(UInt8) }
+    enum Activity: Equatable { case idle, testing, nativeTest, countdown, vibrating, preview }
+    private enum Expected: Equatable { case hello, subscription, pulse(UInt8, nativeBurst: Bool) }
 
     @Published private(set) var devices: [CBPeripheral] = []
     @Published private(set) var activity = Activity.idle
@@ -16,6 +16,8 @@ final class WhoopController: NSObject, ObservableObject, CBCentralManagerDelegat
     @Published private(set) var connecting = false
     @Published private(set) var testAcknowledged = false
     @Published private(set) var confirmed = false
+    @Published private(set) var nativeAcknowledged = false
+    @Published private(set) var nativeConfirmed = false
     @Published private(set) var remaining = 0
     @Published private(set) var listensForTap = false
     @Published private(set) var tapVerified = false
@@ -99,6 +101,25 @@ final class WhoopController: NSObject, ObservableObject, CBCentralManagerDelegat
         message = "Ready to run a timer."
     }
 
+    func testNativeBurst() {
+        guard activity == .idle, confirmed, sessionReady else { return }
+        guard ProcessInfo.processInfo.systemUptime >= earliestPulseAt else {
+            message = "Wait for the last vibration to finish, then try again."
+            return
+        }
+        nativeAcknowledged = false
+        nativeConfirmed = false
+        activity = .nativeTest
+        message = "Testing one short burst."
+        sendPulse(nativeBurst: true)
+    }
+
+    func confirmNativeBurst() {
+        guard activity == .idle, nativeAcknowledged, connected, confirmed else { return }
+        nativeConfirmed = true
+        message = "Native Burst is enabled for this connection."
+    }
+
     func start(schedule: TimerStart, duration: Int, tone: AlarmTone, playSound: Bool) {
         run(schedule: schedule, duration: duration, tone: tone, playSound: playSound, preview: false)
     }
@@ -109,7 +130,7 @@ final class WhoopController: NSObject, ObservableObject, CBCentralManagerDelegat
 
     private func run(schedule: TimerStart, duration: Int, tone: AlarmTone, playSound: Bool, preview: Bool) {
         guard activity == .idle, confirmed, connected, sessionReady,
-              (1...3600).contains(duration) else {
+              (tone != .burst || nativeConfirmed), (1...3600).contains(duration) else {
             return
         }
         let date = Date()
@@ -155,7 +176,7 @@ final class WhoopController: NSObject, ObservableObject, CBCentralManagerDelegat
                         if playSound { self.startSound(tone, repeating: !preview) }
                     }
                     self.cadence?.didSend(at: now)
-                    self.sendPulse()
+                    self.sendPulse(nativeBurst: tone == .burst)
                 }
                 do { try await Task.sleep(for: .milliseconds(30)) } catch { return }
             }
@@ -172,13 +193,13 @@ final class WhoopController: NSObject, ObservableObject, CBCentralManagerDelegat
         }
     }
 
-    private func sendPulse() {
+    private func sendPulse(nativeBurst: Bool = false) {
         guard let peripheral, let command, sessionReady, expected == nil else { return }
         sequence &+= 1
-        earliestPulseAt = ProcessInfo.processInfo.systemUptime + 1
-        expected = .pulse(sequence)
-        record("Sent pulse \(sequence)")
-        peripheral.writeValue(Puffin.buzz(sequence: sequence), for: command, type: .withResponse)
+        earliestPulseAt = ProcessInfo.processInfo.systemUptime + (nativeBurst ? 3 : 1)
+        expected = .pulse(sequence, nativeBurst: nativeBurst)
+        record("Sent \(nativeBurst ? "native burst" : "pulse") \(sequence)")
+        peripheral.writeValue(Puffin.buzz(sequence: sequence, nativeBurst: nativeBurst), for: command, type: .withResponse)
         startTimeout(seconds: 2, message: "No final vibration response from WHOOP.")
     }
 
@@ -236,6 +257,8 @@ final class WhoopController: NSObject, ObservableObject, CBCentralManagerDelegat
         connected = false
         listensForTap = false
         tapVerified = false
+        nativeAcknowledged = false
+        nativeConfirmed = false
         testAcknowledged = false
         confirmed = false
     }
@@ -353,12 +376,18 @@ final class WhoopController: NSObject, ObservableObject, CBCentralManagerDelegat
         }
         guard let bytes = characteristic.value else { return }
         for reply in responses.append(bytes) {
-            guard expected == .pulse(reply.sequence) else { continue }
+            guard case let .pulse(seq, nativeBurst)? = expected, seq == reply.sequence else { continue }
             record("Pulse \(reply.sequence) reply \(reply.status)")
             if reply.status == 2 { continue }
             if reply.status == 0 {
                 timeoutTask?.cancel()
                 expected = nil
+                if nativeBurst {
+                    nativeAcknowledged = false
+                    nativeConfirmed = false
+                    finish("WHOOP declined the burst. You can still use the regular ringtones.")
+                    return
+                }
                 if activity == .vibrating || activity == .preview,
                    cadence?.slowDown(afterRejectionAt: ProcessInfo.processInfo.systemUptime) == true {
                     message = "WHOOP declined a pulse. Allowing at least 1.5 seconds between pulses."
@@ -379,6 +408,9 @@ final class WhoopController: NSObject, ObservableObject, CBCentralManagerDelegat
             if activity == .testing {
                 testAcknowledged = true
                 finish("WHOOP acknowledged the pulse.")
+            } else if activity == .nativeTest {
+                nativeAcknowledged = true
+                finish("WHOOP accepted the burst. Did you feel several quick pulses?")
             }
         }
     }

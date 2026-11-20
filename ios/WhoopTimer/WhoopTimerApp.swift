@@ -31,8 +31,13 @@ struct TimerView: View {
     @State private var showTest = false
     @State private var showTones = false
     @State private var showDetails = false
+    @State private var showNativeTest = false
+    @State private var attemptedNativeTest = false
 
-    private var tone: AlarmTone { AlarmTone(rawValue: toneName) ?? .steady }
+    private var tone: AlarmTone {
+        let selected = AlarmTone(rawValue: toneName) ?? .steady
+        return selected == .burst && !whoop.nativeConfirmed ? .steady : selected
+    }
     private var busy: Bool { whoop.activity != .idle }
     private var schedule: TimerStart? {
         switch mode {
@@ -77,7 +82,8 @@ struct TimerView: View {
             }
         }
         .sheet(isPresented: $showTones, onDismiss: {
-            if whoop.activity == .preview { whoop.stop() }
+            if whoop.activity == .preview || whoop.activity == .nativeTest { whoop.stop() }
+            attemptedNativeTest = false
         }) { tones }
         .sheet(isPresented: $showDetails) { details }
         .alert("Send one short vibration?", isPresented: $showTest) {
@@ -156,6 +162,7 @@ struct TimerView: View {
         switch whoop.activity {
         case .idle: mode == .countdown ? "Countdown" : "Alarm time"
         case .testing: "Sending"
+        case .nativeTest: "Testing strap rhythm"
         case .preview: "Previewing"
         case .countdown: "Alarm starts in"
         case .vibrating: untilDismissed ? "Maximum time left" : "Vibration ends in"
@@ -166,6 +173,7 @@ struct TimerView: View {
         switch whoop.activity {
         case .idle: mode == .countdown ? timeString(Int(delay) ?? 0) : startTime.formatted(date: .omitted, time: .shortened)
         case .testing: "Test pulse"
+        case .nativeTest: "Native Burst"
         case .preview: tone.rawValue
         case .countdown, .vibrating: timeString(whoop.remaining)
         }
@@ -178,7 +186,7 @@ struct TimerView: View {
                 Button(whoop.testAcknowledged ? "I felt it" : "Test Vibration") {
                     if whoop.testAcknowledged { whoop.confirmVibration() } else { showTest = true }
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(TimerFilledButton(fill: accent))
             } else if whoop.connecting {
                 ProgressView("Connecting…")
             } else if whoop.devices.isEmpty {
@@ -190,7 +198,7 @@ struct TimerView: View {
                     Button(whoop.devices.count == 1 ? "Connect WHOOP" : (device.name ?? "WHOOP")) {
                         whoop.connect(device)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(TimerFilledButton(fill: accent))
                 }
             }
         }
@@ -292,10 +300,8 @@ struct TimerView: View {
                 Text(busy ? "Stop" : mode == .countdown ? "Start Timer" : "Arm Alarm")
                     .font(.headline)
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
             }
-            .buttonStyle(.borderedProminent)
-            .tint(busy ? Color(red: 1, green: 0.61, blue: 0.59) : accent)
+            .buttonStyle(TimerFilledButton(fill: busy ? Color(red: 1, green: 0.61, blue: 0.59) : accent))
             .disabled(!busy && schedule == nil)
             Text("Keep this app open and your WHOOP connected.")
                 .font(.caption)
@@ -312,8 +318,12 @@ struct TimerView: View {
                 Section {
                     ForEach(AlarmTone.allCases) { candidate in
                         Button {
-                            toneName = candidate.rawValue
-                            whoop.preview(candidate, playSound: playSound)
+                            if candidate == .burst && !whoop.nativeConfirmed {
+                                showNativeTest = true
+                            } else {
+                                toneName = candidate.rawValue
+                                whoop.preview(candidate, playSound: playSound)
+                            }
                         } label: {
                             HStack {
                                 VStack(alignment: .leading, spacing: 4) {
@@ -324,10 +334,19 @@ struct TimerView: View {
                                 if candidate == tone { Image(systemName: "checkmark.circle.fill") }
                             }
                         }
-                        .disabled(busy)
+                        .disabled(busy || (candidate == .burst && !whoop.confirmed))
+                    }
+                    if whoop.nativeAcknowledged && !whoop.nativeConfirmed {
+                        Button("I felt a quick burst") {
+                            whoop.confirmNativeBurst()
+                            toneName = AlarmTone.burst.rawValue
+                        }
                     }
                 } footer: {
                     Text(whoop.confirmed ? "Tap a ringtone to feel a short preview." : "Connect and test your WHOOP to preview ringtones.")
+                }
+                if attemptedNativeTest && !whoop.message.isEmpty {
+                    Text(whoop.message).font(.footnote).foregroundStyle(.secondary)
                 }
                 Toggle("Also play sound on iPhone", isOn: $playSound)
                     .disabled(busy)
@@ -336,6 +355,15 @@ struct TimerView: View {
                 }
             }
             .navigationTitle("Ringtones")
+            .alert("Test one native burst?", isPresented: $showNativeTest) {
+                Button("Send Test Burst") {
+                    attemptedNativeTest = true
+                    whoop.testNativeBurst()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("One Bluetooth command asks the strap to repeat its usual vibration quickly. Confirm it only if you feel several pulses.")
+            }
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { showTones = false }
@@ -381,6 +409,20 @@ struct TimerView: View {
             return String(format: "%d:%02d:%02d", seconds / 3600, seconds / 60 % 60, seconds % 60)
         }
         return String(format: "%02d:%02d", seconds / 60, seconds % 60)
+    }
+}
+
+private struct TimerFilledButton: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+    let fill: Color
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(Color.black)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 13)
+            .background(fill.opacity(configuration.isPressed ? 0.82 : 1), in: RoundedRectangle(cornerRadius: 12))
+            .opacity(isEnabled ? 1 : 0.55)
     }
 }
 

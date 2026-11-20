@@ -32,6 +32,7 @@ enum AlarmTone: String, CaseIterable, Identifiable {
     case steady = "Steady"
     case double = "Double"
     case swell = "Swell"
+    case burst = "Native Burst"
 
     var id: String { rawValue }
 
@@ -40,6 +41,7 @@ enum AlarmTone: String, CaseIterable, Identifiable {
         case .steady: "Even pulses · soft chime"
         case .double: "Paired pulses · two-note chime"
         case .swell: "Three spaced pulses · rising chime"
+        case .burst: "Quick pulses played by the strap · trial"
         }
     }
 
@@ -48,6 +50,7 @@ enum AlarmTone: String, CaseIterable, Identifiable {
         case .steady: [1.5]
         case .double: [1.2, 2.8]
         case .swell: [1.5, 2, 3]
+        case .burst: [3]
         }
     }
 }
