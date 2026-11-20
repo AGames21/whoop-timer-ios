@@ -1,0 +1,37 @@
+name: Build iPhone companion
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  iphone:
+    runs-on: macos-15
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v6
+      - name: Verify captured WHOOP frames
+        run: |
+          swiftc ios/WhoopTimer/Puffin.swift ios/ProtocolTests/main.swift -o "$RUNNER_TEMP/puffin-tests"
+          "$RUNNER_TEMP/puffin-tests"
+      - name: Build unsigned device app
+        run: |
+          xcodebuild -project ios/WhoopTimer.xcodeproj -scheme WhoopTimer \
+            -configuration Release -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/whoop-build" CODE_SIGNING_ALLOWED=NO build
+      - name: Package unsigned IPA
+        run: |
+          app="$RUNNER_TEMP/whoop-build/Build/Products/Release-iphoneos/WhoopTimer.app"
+          test -x "$app/WhoopTimer"
+          /usr/libexec/PlistBuddy -c 'Print :NSBluetoothAlwaysUsageDescription' "$app/Info.plist"
+          mkdir -p "$RUNNER_TEMP/ipa/Payload"
+          ditto "$app" "$RUNNER_TEMP/ipa/Payload/WhoopTimer.app"
+          ditto -c -k --keepParent "$RUNNER_TEMP/ipa/Payload" "$RUNNER_TEMP/WhoopTimer-unsigned.ipa"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: whoop-timer-iphone
+          path: ${{ runner.temp }}/WhoopTimer-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 1
