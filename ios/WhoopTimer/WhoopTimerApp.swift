@@ -30,7 +30,7 @@ struct TimerView: View {
     private var configuration: (TimerStart, Int, Double)? {
         guard let length = Int(duration), (1...300).contains(length),
               let interval = NumberFormatter.localizedNumber(from: spacing) ?? Double(spacing),
-              (0.5...10).contains(interval) else { return nil }
+              PulseCadence.allowedSpacing.contains(interval) else { return nil }
         switch startMode {
         case .countdown:
             guard let seconds = Int(delay), (0...3600).contains(seconds) else { return nil }
@@ -117,8 +117,8 @@ struct TimerView: View {
                         }
                         if configuration == nil {
                             Text(startMode == .scheduled
-                                 ? "Choose a future start time, 1–300 s of vibration, and 0.5–10 s between pulses."
-                                 : "Enter 0–3600 s to start, 1–300 s of vibration, and 0.5–10 s between pulses.")
+                                 ? "Choose a future start time, 1–300 s of vibration, and 1–10 s between pulses."
+                                 : "Enter 0–3600 s to start, 1–300 s of vibration, and 1–10 s between pulses.")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                         }

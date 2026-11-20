@@ -10,7 +10,7 @@ A companion for a WHOOP 5.0 already connected to the iPhone. Start after a count
 4. Choose **Countdown** and **Start Timer**, or choose **At a time**, select a date and time, and tap **Arm Alarm**. Keep WHOOP Timer on screen until it finishes. The system display stays awake while the timer is armed or running. Locking the phone or switching away cancels the timer and releases its local connection.
 5. After the test, confirm the official WHOOP app still syncs.
 
-The Swift protocol implementation uses the same one-shot command as the Windows app and waits for a matching final reply before sending another pulse. Start with 1.5-second spacing. If the strap declines a faster pulse with status 0, the timer switches to 1.5-second spacing for the rest of that run. A further refusal stops the timer and keeps the connection. iPhone scheduling with the phone locked is outside this version.
+The Swift protocol implementation uses the same one-shot command as the Windows app and waits for a matching final reply before sending another pulse. Pulse spacing can be set from 1 to 10 seconds and defaults to 1.5. The user reported refusals below one second on this strap. If the strap declines a faster pulse with status 0, the timer switches to 1.5-second spacing for the rest of that run. A further refusal stops the timer and keeps the connection. iPhone scheduling with the phone locked is outside this version.
 
 ## Build and install
 

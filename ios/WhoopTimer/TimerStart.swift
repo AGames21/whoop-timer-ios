@@ -29,6 +29,7 @@ enum TimerStart {
 }
 
 struct PulseCadence {
+    static let allowedSpacing: ClosedRange<TimeInterval> = 1...10
     static let testedSpacing: TimeInterval = 1.5
 
     private(set) var spacing: TimeInterval

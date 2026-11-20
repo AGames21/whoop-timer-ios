@@ -88,7 +88,7 @@ final class WhoopController: NSObject, ObservableObject, CBCentralManagerDelegat
 
     func start(schedule: TimerStart, duration: Int, spacing: Double) {
         guard activity == .idle, confirmed, connected, sessionReady,
-              (1...300).contains(duration), (0.5...10).contains(spacing) else {
+              (1...300).contains(duration), PulseCadence.allowedSpacing.contains(spacing) else {
             return
         }
         let date = Date()
