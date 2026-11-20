@@ -7,10 +7,12 @@ A companion for a WHOOP 5.0 already connected to the iPhone. Start after a count
 1. Confirm the official WHOOP app can sync. Leave the Windows controller disconnected.
 2. Open WHOOP Timer, allow Bluetooth access, and select your WHOOP. The companion looks for the device already connected to iOS. If none is listed, open the official app, let it connect, then return and tap **Refresh**.
 3. Tap **Test Vibration**, confirm one pulse, and tap **I felt it** if you feel the buzz. If iOS presents a new system pairing prompt, cancel it and disconnect.
-4. Choose **Countdown** and **Start Timer**, or choose **At a time**, select a date and time, and tap **Arm Alarm**. Keep WHOOP Timer on screen until it finishes. The system display stays awake while the timer is armed or running. Locking the phone or switching away cancels the timer and releases its local connection.
-5. After the test, confirm the official WHOOP app still syncs.
+4. Choose a countdown preset or enter custom seconds, then tap **Start Timer**. For a scheduled alarm, choose **At a time**, select a date and time, and tap **Arm Alarm**. The display stays awake while the timer is armed or running. Locking the phone or switching away cancels it.
+5. Tap **Ringtone** to choose and preview Steady, Double, or Swell. Each uses a different wrist cadence. **Also play sound on iPhone** adds the matching chime through the phone when sound is on.
+6. In **Ring until dismissed** mode, the app repeats until it sees a live double-tap, you tap **Stop**, the connection is lost, or its selected maximum runtime is reached. To check for tap support, open **Strap** after testing vibration, double-tap the top of the sensor, and look for **Double-tap detected**. Double-tap dismissal on the target sensor has yet to be verified.
+7. After testing, check that the official WHOOP app still syncs.
 
-The Swift protocol implementation uses the same one-shot command as the Windows app and waits for a matching final reply before sending another pulse. Pulse spacing can be set from 1 to 10 seconds and defaults to 1.5. The user reported refusals below one second on this strap. If the strap declines a faster pulse with status 0, the timer switches to 1.5-second spacing for the rest of that run. A further refusal stops the timer and keeps the connection. iPhone scheduling with the phone locked is outside this version.
+The iPhone companion attaches to the existing iOS connection. The WHOOP app and the timer have separate purposes, and coexistence during a run still needs a target-device check. The Swift protocol sends the verified one-shot command and waits for a final reply before the next pulse. If the strap declines a fast pulse, the timer enforces at least 1.5 seconds between pulses for the rest of that run. A further refusal stops the timer and retains the connection. The app listens for fresh strap tap events through the WHOOP notification characteristic.
 
 ## Build and install
 

@@ -1,10 +1,11 @@
+import AVFoundation
 import Combine
 @preconcurrency import CoreBluetooth
 import Foundation
 
 @MainActor
 final class WhoopController: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeripheralDelegate {
-    enum Activity: Equatable { case idle, testing, countdown, vibrating }
+    enum Activity: Equatable { case idle, testing, countdown, vibrating, preview }
     private enum Expected: Equatable { case hello, subscription, pulse(UInt8) }
 
     @Published private(set) var devices: [CBPeripheral] = []
@@ -16,20 +17,28 @@ final class WhoopController: NSObject, ObservableObject, CBCentralManagerDelegat
     @Published private(set) var testAcknowledged = false
     @Published private(set) var confirmed = false
     @Published private(set) var remaining = 0
+    @Published private(set) var listensForTap = false
+    @Published private(set) var tapVerified = false
     @Published private(set) var log: [String] = []
 
     private let serviceID = CBUUID(string: Puffin.service)
     private let writeID = CBUUID(string: Puffin.write)
     private let responseID = CBUUID(string: Puffin.notify)
+    private let eventID = CBUUID(string: Puffin.events)
     private var central: CBCentralManager?
     private var peripheral: CBPeripheral?
     private var command: CBCharacteristic?
     private var response: CBCharacteristic?
+    private var event: CBCharacteristic?
     private var sessionReady = false
     private var expected: Expected?
     private var sequence: UInt8 = 1
     private var responses = HapticResponses()
+    private var events = PuffinFrames()
     private var cadence: PulseCadence?
+    private var audio: AVAudioPlayer?
+    private var ringingSince: TimeInterval?
+    private var earliestPulseAt: TimeInterval = 0
     private var clockTask: Task<Void, Never>?
     private var timeoutTask: Task<Void, Never>?
 
@@ -68,6 +77,10 @@ final class WhoopController: NSObject, ObservableObject, CBCentralManagerDelegat
 
     func test() {
         guard activity == .idle, connected, let peripheral, let command else { return }
+        guard ProcessInfo.processInfo.systemUptime >= earliestPulseAt else {
+            message = "Give the strap a moment before testing again."
+            return
+        }
         activity = .testing
         testAcknowledged = false
         confirmed = false
@@ -86,9 +99,17 @@ final class WhoopController: NSObject, ObservableObject, CBCentralManagerDelegat
         message = "Ready to run a timer."
     }
 
-    func start(schedule: TimerStart, duration: Int, spacing: Double) {
+    func start(schedule: TimerStart, duration: Int, tone: AlarmTone, playSound: Bool) {
+        run(schedule: schedule, duration: duration, tone: tone, playSound: playSound, preview: false)
+    }
+
+    func preview(_ tone: AlarmTone, playSound: Bool) {
+        run(schedule: .countdown(0), duration: 6, tone: tone, playSound: playSound, preview: true)
+    }
+
+    private func run(schedule: TimerStart, duration: Int, tone: AlarmTone, playSound: Bool, preview: Bool) {
         guard activity == .idle, confirmed, connected, sessionReady,
-              (1...300).contains(duration), PulseCadence.allowedSpacing.contains(spacing) else {
+              (1...3600).contains(duration) else {
             return
         }
         let date = Date()
@@ -99,11 +120,13 @@ final class WhoopController: NSObject, ObservableObject, CBCentralManagerDelegat
         }
         let wait = deadline.remaining(at: date, uptime: uptime)
         message = ""
-        cadence = PulseCadence(spacing: spacing)
-        activity = wait > 0 ? .countdown : .vibrating
+        cadence = PulseCadence(tone: tone)
+        let ringing = preview ? Activity.preview : .vibrating
+        activity = wait > 0 ? .countdown : ringing
         remaining = wait > 0 ? Int(ceil(wait)) : duration
         clockTask = Task { [weak self] in
             var endAt: TimeInterval?
+            var firstPulse = true
             while !Task.isCancelled {
                 guard let self else { return }
                 let now = ProcessInfo.processInfo.systemUptime
@@ -116,15 +139,21 @@ final class WhoopController: NSObject, ObservableObject, CBCentralManagerDelegat
                         continue
                     }
                     endAt = now + Double(duration)
-                    if self.activity != .vibrating { self.activity = .vibrating }
+                    if self.activity != ringing { self.activity = ringing }
+                    if !preview { self.ringingSince = Date().timeIntervalSince1970 }
                 }
                 guard let endAt, now < endAt else {
-                    self.finish("Timer complete.")
+                    self.finish(preview ? "Preview complete." : "Alarm finished at its time limit.")
                     return
                 }
                 let seconds = Int(ceil(endAt - now))
                 if self.remaining != seconds { self.remaining = seconds }
-                if let nextPulse = self.cadence?.nextAt, now >= nextPulse, self.expected == nil {
+                if let nextPulse = self.cadence?.nextAt,
+                   now >= max(nextPulse, self.earliestPulseAt), self.expected == nil {
+                    if firstPulse {
+                        firstPulse = false
+                        if playSound { self.startSound(tone, repeating: !preview) }
+                    }
                     self.cadence?.didSend(at: now)
                     self.sendPulse()
                 }
@@ -146,10 +175,27 @@ final class WhoopController: NSObject, ObservableObject, CBCentralManagerDelegat
     private func sendPulse() {
         guard let peripheral, let command, sessionReady, expected == nil else { return }
         sequence &+= 1
+        earliestPulseAt = ProcessInfo.processInfo.systemUptime + 1
         expected = .pulse(sequence)
         record("Sent pulse \(sequence)")
         peripheral.writeValue(Puffin.buzz(sequence: sequence), for: command, type: .withResponse)
         startTimeout(seconds: 2, message: "No final vibration response from WHOOP.")
+    }
+
+    private func startSound(_ tone: AlarmTone, repeating: Bool) {
+        guard let url = Bundle.main.url(forResource: tone.rawValue, withExtension: "wav", subdirectory: "Sounds") else {
+            record("Phone chime file unavailable.")
+            return
+        }
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.ambient)
+            let player = try AVAudioPlayer(contentsOf: url)
+            player.numberOfLoops = repeating ? -1 : 0
+            audio = player
+            if !player.play() { record("Phone chime could not start.") }
+        } catch {
+            record("Phone chime unavailable.")
+        }
     }
 
     private func startTimeout(seconds: Int, message: String) {
@@ -167,6 +213,9 @@ final class WhoopController: NSObject, ObservableObject, CBCentralManagerDelegat
         timeoutTask = nil
         expected = nil
         cadence = nil
+        ringingSince = nil
+        audio?.stop()
+        audio = nil
         remaining = 0
         activity = .idle
         message = result
@@ -178,11 +227,15 @@ final class WhoopController: NSObject, ObservableObject, CBCentralManagerDelegat
         peripheral = nil
         command = nil
         response = nil
+        event = nil
         responses = HapticResponses()
+        events = PuffinFrames()
         sessionReady = false
         sequence = 1
         connecting = false
         connected = false
+        listensForTap = false
+        tapVerified = false
         testAcknowledged = false
         confirmed = false
     }
@@ -230,7 +283,7 @@ final class WhoopController: NSObject, ObservableObject, CBCentralManagerDelegat
             fail("WHOOP 5.0 service unavailable.")
             return
         }
-        peripheral.discoverCharacteristics([writeID, responseID], for: service)
+        peripheral.discoverCharacteristics([writeID, responseID, eventID], for: service)
     }
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
@@ -247,6 +300,9 @@ final class WhoopController: NSObject, ObservableObject, CBCentralManagerDelegat
         }
         self.command = command
         self.response = response
+        event = service.characteristics?.first {
+            $0.uuid == eventID && !$0.properties.intersection([.notify, .indicate]).isEmpty
+        }
         timeoutTask?.cancel()
         connecting = false
         connected = true
@@ -267,18 +323,30 @@ final class WhoopController: NSObject, ObservableObject, CBCentralManagerDelegat
     }
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?) {
-        guard peripheral == self.peripheral, characteristic.uuid == responseID, expected == .subscription else { return }
+        guard peripheral == self.peripheral else { return }
+        if characteristic.uuid == eventID {
+            listensForTap = error == nil && characteristic.isNotifying
+            if !listensForTap { record("WHOOP tap notifications unavailable.") }
+            return
+        }
+        guard characteristic.uuid == responseID, expected == .subscription else { return }
         guard error == nil, characteristic.isNotifying else {
             fail("Couldn’t subscribe to WHOOP command replies.")
             return
         }
         expected = nil
         sessionReady = true
+        if let event { peripheral.setNotifyValue(true, for: event) }
         sendPulse()
     }
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
-        guard peripheral == self.peripheral, characteristic.uuid == responseID else { return }
+        guard peripheral == self.peripheral else { return }
+        if characteristic.uuid == eventID {
+            if error == nil, let bytes = characteristic.value { handleEvents(bytes) }
+            return
+        }
+        guard characteristic.uuid == responseID else { return }
         if let error, expected != nil {
             fail(error.localizedDescription)
             return
@@ -291,10 +359,10 @@ final class WhoopController: NSObject, ObservableObject, CBCentralManagerDelegat
             if reply.status == 0 {
                 timeoutTask?.cancel()
                 expected = nil
-                if activity == .vibrating,
+                if activity == .vibrating || activity == .preview,
                    cadence?.slowDown(afterRejectionAt: ProcessInfo.processInfo.systemUptime) == true {
-                    message = "WHOOP declined a pulse. Slowed to one pulse every 1.5 seconds."
-                    record("Slowed to 1.5 seconds after a rejected pulse.")
+                    message = "WHOOP declined a pulse. Allowing at least 1.5 seconds between pulses."
+                    record("Increased the minimum pulse gap after a rejection.")
                 } else {
                     finish(activity == .testing
                            ? "WHOOP declined the test pulse. Wait a moment before trying again."
@@ -311,6 +379,20 @@ final class WhoopController: NSObject, ObservableObject, CBCentralManagerDelegat
             if activity == .testing {
                 testAcknowledged = true
                 finish("WHOOP acknowledged the pulse.")
+            }
+        }
+    }
+
+    private func handleEvents(_ bytes: Data) {
+        let now = Date().timeIntervalSince1970
+        for inner in events.append(bytes) {
+            guard let tap = Puffin.doubleTapTimestamp(inner),
+                  Puffin.isLiveTap(tap, now: now, ringingSince: ringingSince) else { continue }
+            tapVerified = true
+            record("WHOOP double-tap detected.")
+            if activity == .vibrating, ringingSince != nil {
+                finish("Dismissed by double-tap.")
+                return
             }
         }
     }

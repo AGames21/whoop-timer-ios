@@ -28,25 +28,51 @@ enum TimerStart {
     }
 }
 
+enum AlarmTone: String, CaseIterable, Identifiable {
+    case steady = "Steady"
+    case double = "Double"
+    case swell = "Swell"
+
+    var id: String { rawValue }
+
+    var detail: String {
+        switch self {
+        case .steady: "Even pulses · soft chime"
+        case .double: "Paired pulses · two-note chime"
+        case .swell: "Three spaced pulses · rising chime"
+        }
+    }
+
+    var gaps: [TimeInterval] {
+        switch self {
+        case .steady: [1.5]
+        case .double: [1.2, 2.8]
+        case .swell: [1.5, 2, 3]
+        }
+    }
+}
+
 struct PulseCadence {
-    static let allowedSpacing: ClosedRange<TimeInterval> = 1...10
     static let testedSpacing: TimeInterval = 1.5
 
-    private(set) var spacing: TimeInterval
+    private let gaps: [TimeInterval]
+    private var index = 0
+    private var floor: TimeInterval = 1
     private(set) var nextAt: TimeInterval = 0
 
-    init(spacing: TimeInterval) {
-        self.spacing = spacing
+    init(tone: AlarmTone) {
+        gaps = tone.gaps
     }
 
     mutating func didSend(at uptime: TimeInterval) {
-        nextAt = uptime + spacing
+        nextAt = uptime + max(floor, gaps[index])
+        index = (index + 1) % gaps.count
     }
 
     mutating func slowDown(afterRejectionAt uptime: TimeInterval) -> Bool {
-        guard spacing < Self.testedSpacing else { return false }
-        spacing = Self.testedSpacing
-        nextAt = uptime + spacing
+        guard floor < Self.testedSpacing, gaps.contains(where: { $0 < Self.testedSpacing }) else { return false }
+        floor = Self.testedSpacing
+        nextAt = uptime + floor
         return true
     }
 }

@@ -4,6 +4,7 @@ enum Puffin {
     static let service = "FD4B0001-CCE1-4033-93CE-002D5875F58A"
     static let write = "FD4B0002-CCE1-4033-93CE-002D5875F58A"
     static let notify = "FD4B0003-CCE1-4033-93CE-002D5875F58A"
+    static let events = "FD4B0004-CCE1-4033-93CE-002D5875F58A"
     static let hello = Data([0xaa, 1, 8, 0, 0, 1, 0xe6, 0x71,
                              0x23, 1, 0x91, 1, 0x36, 0x3e, 0x5c, 0x8d])
     static let haptic: UInt8 = 0x13
@@ -34,6 +35,19 @@ enum Puffin {
             }
         }
     }
+
+    static func doubleTapTimestamp(_ inner: [UInt8]) -> TimeInterval? {
+        // Type 54 carries the battery pack's event vocabulary. Only type 48 is a strap tap.
+        guard inner.count >= 8, inner[0] == 48, inner[2] == 14 else { return nil }
+        let seconds = (0..<4).reduce(UInt32(0)) { value, offset in
+            value | UInt32(inner[4 + offset]) << (8 * offset)
+        }
+        return seconds > 0 ? TimeInterval(seconds) : nil
+    }
+
+    static func isLiveTap(_ timestamp: TimeInterval, now: TimeInterval, ringingSince: TimeInterval?) -> Bool {
+        abs(now - timestamp) <= 10 && (ringingSince.map { timestamp >= floor($0) } ?? true)
+    }
 }
 
 struct HapticResponses {
@@ -42,11 +56,24 @@ struct HapticResponses {
         let status: UInt8
     }
 
-    private var buffer: [UInt8] = []
+    private var frames = PuffinFrames()
 
     mutating func append(_ value: Data) -> [Response] {
+        frames.append(value).compactMap { inner in
+            guard inner.count >= 5, (inner[0] == 36 || inner[0] == 38), inner[2] == Puffin.haptic else {
+                return nil
+            }
+            return Response(sequence: inner[3], status: inner[4])
+        }
+    }
+}
+
+struct PuffinFrames {
+    private var buffer: [UInt8] = []
+
+    mutating func append(_ value: Data) -> [[UInt8]] {
         buffer.append(contentsOf: value)
-        var results: [Response] = []
+        var results: [[UInt8]] = []
         var offset = 0
         while buffer.count - offset >= 8 {
             let length = Int(buffer[offset + 2]) | Int(buffer[offset + 3]) << 8
@@ -62,16 +89,11 @@ struct HapticResponses {
             offset = end
             let tail = end - 4
             let inner = buffer[(start + 8)..<tail]
-            guard inner.count >= 5 else { continue }
-            let first = inner.startIndex
-            guard (inner[first] == 36 || inner[first] == 38), inner[first + 2] == Puffin.haptic else {
-                continue
-            }
             let expectedCRC = (0..<4).reduce(UInt32(0)) { sum, byte in
                 sum | UInt32(buffer[tail + byte]) << (8 * byte)
             }
             guard Puffin.crc32(inner) == expectedCRC else { continue }
-            results.append(Response(sequence: inner[first + 3], status: inner[first + 4]))
+            results.append(Array(inner))
         }
         buffer.removeFirst(offset)
         return results
