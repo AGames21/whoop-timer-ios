@@ -4,5 +4,11 @@
 <dict>
     <key>NSBluetoothAlwaysUsageDescription</key>
     <string>Connect to your WHOOP to deliver timer vibrations.</string>
+    <key>NSAlarmKitUsageDescription</key>
+    <string>Ring an iPhone backup alarm if the WHOOP timer cannot start.</string>
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>bluetooth-central</string>
+    </array>
 </dict>
 </plist>

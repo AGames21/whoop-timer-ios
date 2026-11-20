@@ -21,6 +21,7 @@ struct TimerView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var whoop = WhoopController()
     @AppStorage("playPhoneChime") private var playSound = false
+    @AppStorage("usePhoneAlarmBackup") private var phoneBackup = true
     @AppStorage("ringUntilDismissed") private var untilDismissed = true
     @AppStorage("alarmLimitMinutes") private var limit = 15
     @AppStorage("ringSeconds") private var ringSeconds = 60
@@ -52,6 +53,22 @@ struct TimerView: View {
                     soundSettings
                     dismissalSettings
                 }
+                if let date = whoop.phoneAlarmDate {
+                    HStack {
+                        Label("iPhone backup set for \(date.formatted(date: .omitted, time: .standard))",
+                              systemImage: "alarm")
+                            .font(.footnote)
+                        Spacer()
+                        if !busy {
+                            Button("Cancel") { whoop.cancelPhoneAlarm() }
+                                .font(.footnote.weight(.semibold))
+                        }
+                    }
+                    .panel()
+                }
+                if !whoop.phoneAlarmMessage.isEmpty {
+                    Text(whoop.phoneAlarmMessage).font(.footnote).foregroundStyle(.secondary)
+                }
                 if !whoop.message.isEmpty {
                     Text(whoop.message)
                         .font(.footnote)
@@ -76,12 +93,13 @@ struct TimerView: View {
         .onChange(of: busy) { _, active in
             UIApplication.shared.isIdleTimerDisabled = active
         }
-        .onChange(of: scenePhase) { _, phase in
+        .onChange(of: scenePhase, initial: true) { _, phase in
             if phase == .background {
-                whoop.disconnect()
+                whoop.background()
                 UIApplication.shared.isIdleTimerDisabled = false
             } else if phase == .active {
-                whoop.refresh()
+                whoop.foreground()
+                UIApplication.shared.isIdleTimerDisabled = busy
             }
         }
     }
@@ -235,6 +253,13 @@ struct TimerView: View {
             }
             Toggle("Also play sound on iPhone", isOn: $playSound)
                 .font(.subheadline)
+            if #available(iOS 26.0, *) {
+                Divider()
+                Toggle("iPhone backup alarm", isOn: $phoneBackup)
+                    .font(.subheadline.weight(.semibold))
+                Text("If WHOOP hasn’t responded, your iPhone rings 8 seconds after the target time.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
         }
         .panel()
     }
@@ -269,7 +294,7 @@ struct TimerView: View {
                     whoop.stop()
                 } else if let schedule {
                     whoop.start(schedule: schedule, duration: untilDismissed ? limit * 60 : ringSeconds,
-                                playSound: playSound)
+                                playSound: playSound, phoneBackup: phoneBackup)
                 }
             } label: {
                 Text(busy ? "Stop" : mode == .countdown ? "Start Timer" : "Arm Alarm")
@@ -278,7 +303,7 @@ struct TimerView: View {
             }
             .buttonStyle(TimerFilledButton(fill: busy ? Color(red: 1, green: 0.61, blue: 0.59) : accent))
             .disabled(!busy && schedule == nil)
-            Text("Keep this app open and your WHOOP connected.")
+            Text("Keep the app open for the most reliable wrist vibration.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -293,7 +318,10 @@ struct TimerView: View {
                 Section("Connection") {
                     Text(whoop.status)
                     if whoop.connected {
-                        Button("Disconnect", role: .destructive) { whoop.disconnect() }
+                        Button("Disconnect", role: .destructive) {
+                            whoop.stop()
+                            whoop.disconnect()
+                        }
                     }
                     Text(whoop.tapVerified ? "Double-tap detected"
                          : whoop.listensForTap ? "Listening for double-taps. Tap your WHOOP twice to check."

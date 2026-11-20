@@ -10,6 +10,7 @@
         A10000000000000000000004 = {isa = PBXBuildFile; fileRef = A20000000000000000000006; };
         A10000000000000000000005 = {isa = PBXBuildFile; fileRef = A20000000000000000000007; };
         A10000000000000000000006 = {isa = PBXBuildFile; fileRef = A20000000000000000000008; };
+        A10000000000000000000007 = {isa = PBXBuildFile; fileRef = A20000000000000000000009; };
 
         A20000000000000000000001 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopTimerApp.swift; sourceTree = "<group>"; };
         A20000000000000000000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopController.swift; sourceTree = "<group>"; };
@@ -19,6 +20,7 @@
         A20000000000000000000006 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerStart.swift; sourceTree = "<group>"; };
         A20000000000000000000007 = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
         A20000000000000000000008 = {isa = PBXFileReference; lastKnownFileType = folder; path = Sounds; sourceTree = "<group>"; };
+        A20000000000000000000009 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneAlarm.swift; sourceTree = "<group>"; };
 
         A30000000000000000000001 = {
             isa = PBXGroup;
@@ -27,7 +29,7 @@
         };
         A30000000000000000000002 = {
             isa = PBXGroup;
-            children = (A20000000000000000000001, A20000000000000000000002, A20000000000000000000003, A20000000000000000000005, A20000000000000000000006, A20000000000000000000007, A20000000000000000000008);
+            children = (A20000000000000000000001, A20000000000000000000002, A20000000000000000000003, A20000000000000000000005, A20000000000000000000006, A20000000000000000000007, A20000000000000000000008, A20000000000000000000009);
             path = WhoopTimer;
             sourceTree = "<group>";
         };
@@ -41,7 +43,7 @@
         A40000000000000000000001 = {
             isa = PBXSourcesBuildPhase;
             buildActionMask = 2147483647;
-            files = (A10000000000000000000001, A10000000000000000000002, A10000000000000000000003, A10000000000000000000004);
+            files = (A10000000000000000000001, A10000000000000000000002, A10000000000000000000003, A10000000000000000000004, A10000000000000000000007);
             runOnlyForDeploymentPostprocessing = 0;
         };
         A40000000000000000000002 = {
@@ -111,13 +113,13 @@
             buildSettings = {
                 CODE_SIGN_STYLE = Automatic;
                 ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-                CURRENT_PROJECT_VERSION = 6;
+                CURRENT_PROJECT_VERSION = 7;
                 GENERATE_INFOPLIST_FILE = YES;
                 INFOPLIST_KEY_CFBundleDisplayName = "WHOOP Timer";
                 INFOPLIST_FILE = WhoopTimer/Info.plist;
                 INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
                 INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-                MARKETING_VERSION = 0.4.0;
+                MARKETING_VERSION = 0.4.1;
                 PRODUCT_BUNDLE_IDENTIFIER = com.wristpulsetimer.companion;
                 PRODUCT_NAME = "$(TARGET_NAME)";
                 TARGETED_DEVICE_FAMILY = 1;
@@ -129,13 +131,13 @@
             buildSettings = {
                 CODE_SIGN_STYLE = Automatic;
                 ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-                CURRENT_PROJECT_VERSION = 6;
+                CURRENT_PROJECT_VERSION = 7;
                 GENERATE_INFOPLIST_FILE = YES;
                 INFOPLIST_KEY_CFBundleDisplayName = "WHOOP Timer";
                 INFOPLIST_FILE = WhoopTimer/Info.plist;
                 INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
                 INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-                MARKETING_VERSION = 0.4.0;
+                MARKETING_VERSION = 0.4.1;
                 PRODUCT_BUNDLE_IDENTIFIER = com.wristpulsetimer.companion;
                 PRODUCT_NAME = "$(TARGET_NAME)";
                 TARGETED_DEVICE_FAMILY = 1;

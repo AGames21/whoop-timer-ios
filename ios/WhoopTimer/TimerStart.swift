@@ -28,6 +28,18 @@ enum TimerStart {
     }
 }
 
+enum BackgroundAlarmTiming {
+    static let grace: TimeInterval = 8
+
+    static func phoneAlert(at target: Date) -> Date {
+        target.addingTimeInterval(grace)
+    }
+
+    static func wristDeadlineMissed(remaining: TimeInterval) -> Bool {
+        remaining <= -grace
+    }
+}
+
 enum WhoopSelection {
     static func automatic(from available: [UUID], remembered: UUID?) -> UUID? {
         if let remembered { return available.contains(remembered) ? remembered : nil }

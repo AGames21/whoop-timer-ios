@@ -2,6 +2,7 @@ import AVFoundation
 import Combine
 @preconcurrency import CoreBluetooth
 import Foundation
+import UIKit
 
 @MainActor
 final class WhoopController: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeripheralDelegate {
@@ -18,12 +19,16 @@ final class WhoopController: NSObject, ObservableObject, CBCentralManagerDelegat
     @Published private(set) var listensForTap = false
     @Published private(set) var tapVerified = false
     @Published private(set) var log: [String] = []
+    @Published private(set) var phoneAlarmDate: Date?
+    @Published private(set) var phoneAlarmMessage = ""
 
     private let serviceID = CBUUID(string: Puffin.service)
     private let writeID = CBUUID(string: Puffin.write)
     private let responseID = CBUUID(string: Puffin.notify)
     private let eventID = CBUUID(string: Puffin.events)
     private let rememberedKey = "connectedWhoopIdentifier"
+    private let phoneAlarmIDKey = "phoneBackupAlarmID"
+    private let phoneAlarmDateKey = "phoneBackupAlarmDate"
     private var central: CBCentralManager?
     private var peripheral: CBPeripheral?
     private var command: CBCharacteristic?
@@ -39,10 +44,42 @@ final class WhoopController: NSObject, ObservableObject, CBCentralManagerDelegat
     private var earliestPulseAt: TimeInterval = 0
     private var clockTask: Task<Void, Never>?
     private var timeoutTask: Task<Void, Never>?
+    private var phoneAlarmTask: Task<Void, Never>?
+    private var phoneAlarmID: UUID?
+    private var schedulingPhoneAlarm = false
+    private var firstBurstConfirmed = false
+    private var previewActive = false
+    private var backgroundAllowance = UIBackgroundTaskIdentifier.invalid
 
     override init() {
         super.init()
+        phoneAlarmID = UserDefaults.standard.string(forKey: phoneAlarmIDKey).flatMap { UUID(uuidString: $0) }
+        phoneAlarmDate = UserDefaults.standard.object(forKey: phoneAlarmDateKey) as? Date
         central = CBCentralManager(delegate: self, queue: .main)
+    }
+
+    func foreground() {
+        releaseBackgroundAllowance()
+        synchronizePhoneAlarm()
+        refresh()
+    }
+
+    func background() {
+        if activity == .idle || previewActive {
+            disconnect()
+            return
+        }
+        // Give an imminent Bluetooth action a chance to finish while iOS allows it.
+        guard remaining <= 20 || activity == .vibrating, backgroundAllowance == .invalid else { return }
+        backgroundAllowance = UIApplication.shared.beginBackgroundTask(withName: "WHOOP alarm BLE") { [weak self] in
+            Task { @MainActor in self?.releaseBackgroundAllowance() }
+        }
+    }
+
+    private func releaseBackgroundAllowance() {
+        guard backgroundAllowance != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(backgroundAllowance)
+        backgroundAllowance = .invalid
     }
 
     func refresh() {
@@ -86,15 +123,16 @@ final class WhoopController: NSObject, ObservableObject, CBCentralManagerDelegat
         startTimeout(seconds: 5, message: "WHOOP did not acknowledge the session setup.")
     }
 
-    func start(schedule: TimerStart, duration: Int, playSound: Bool) {
-        run(schedule: schedule, duration: duration, playSound: playSound, preview: false)
+    func start(schedule: TimerStart, duration: Int, playSound: Bool, phoneBackup: Bool) {
+        run(schedule: schedule, duration: duration, playSound: playSound, preview: false, phoneBackup: phoneBackup)
     }
 
     func preview(playSound: Bool) {
-        run(schedule: .countdown(0), duration: Int(Puffin.nativeBurstSpacing), playSound: playSound, preview: true)
+        run(schedule: .countdown(0), duration: Int(Puffin.nativeBurstSpacing), playSound: playSound,
+            preview: true, phoneBackup: false)
     }
 
-    private func run(schedule: TimerStart, duration: Int, playSound: Bool, preview: Bool) {
+    private func run(schedule: TimerStart, duration: Int, playSound: Bool, preview: Bool, phoneBackup: Bool) {
         guard activity == .idle, connected, (1...3600).contains(duration) else { return }
         let date = Date()
         let uptime = ProcessInfo.processInfo.systemUptime
@@ -103,7 +141,13 @@ final class WhoopController: NSObject, ObservableObject, CBCentralManagerDelegat
             return
         }
         let wait = deadline.remaining(at: date, uptime: uptime)
+        if !preview {
+            guard cancelPhoneAlarm() else { return }
+            phoneAlarmMessage = ""
+            if phoneBackup { armPhoneAlarm(at: BackgroundAlarmTiming.phoneAlert(at: date.addingTimeInterval(wait))) }
+        }
         message = ""
+        previewActive = preview
         let ringing = preview ? Activity.preview : .vibrating
         activity = wait > 0 ? .countdown : .preparing
         remaining = wait > 0 ? Int(ceil(wait)) : duration
@@ -120,6 +164,10 @@ final class WhoopController: NSObject, ObservableObject, CBCentralManagerDelegat
                         if self.remaining != seconds { self.remaining = seconds }
                         do { try await Task.sleep(for: .seconds(min(0.25, wait))) } catch { return }
                         continue
+                    }
+                    if !preview && BackgroundAlarmTiming.wristDeadlineMissed(remaining: wait) {
+                        self.finish("WHOOP missed the alarm start time.")
+                        return
                     }
                     if !self.sessionReady || now < self.earliestPulseAt {
                         if self.activity != .preparing { self.activity = .preparing }
@@ -150,6 +198,7 @@ final class WhoopController: NSObject, ObservableObject, CBCentralManagerDelegat
     }
 
     func stop() {
+        if !previewActive { _ = cancelPhoneAlarm() }
         guard activity != .idle else { return }
         if activity == .preparing && !sessionReady {
             disconnect()
@@ -157,6 +206,65 @@ final class WhoopController: NSObject, ObservableObject, CBCentralManagerDelegat
         } else {
             finish("Stopped. A pulse already sent can finish.")
         }
+    }
+
+    private func armPhoneAlarm(at date: Date) {
+        guard #available(iOS 26.0, *) else { return }
+        let id = UUID()
+        phoneAlarmID = id
+        schedulingPhoneAlarm = true
+        phoneAlarmMessage = "Setting the iPhone backup…"
+        UserDefaults.standard.set(id.uuidString, forKey: phoneAlarmIDKey)
+        UserDefaults.standard.set(date, forKey: phoneAlarmDateKey)
+        phoneAlarmTask = Task { [weak self] in
+            do {
+                try await PhoneAlarm.schedule(id: id, at: date)
+                guard let self, self.phoneAlarmID == id else {
+                    try? PhoneAlarm.cancel(id: id)
+                    return
+                }
+                self.schedulingPhoneAlarm = false
+                self.phoneAlarmDate = date
+                self.phoneAlarmMessage = ""
+            } catch {
+                guard let self, self.phoneAlarmID == id else {
+                    try? PhoneAlarm.cancel(id: id)
+                    return
+                }
+                self.clearPhoneAlarmRecord()
+                self.phoneAlarmMessage = "iPhone backup couldn’t be scheduled. Check Alarm permission in Settings."
+            }
+        }
+    }
+
+    @discardableResult
+    func cancelPhoneAlarm() -> Bool {
+        guard let id = phoneAlarmID else { return true }
+        phoneAlarmTask?.cancel()
+        phoneAlarmTask = nil
+        if #available(iOS 26.0, *) {
+            do { try PhoneAlarm.cancel(id: id) } catch {
+                phoneAlarmMessage = "iPhone backup may still be set. Try canceling it again."
+                return false
+            }
+        }
+        clearPhoneAlarmRecord()
+        phoneAlarmMessage = ""
+        return true
+    }
+
+    private func synchronizePhoneAlarm() {
+        guard #available(iOS 26.0, *), let id = phoneAlarmID, !schedulingPhoneAlarm,
+              let exists = try? PhoneAlarm.exists(id: id) else { return }
+        if !exists { clearPhoneAlarmRecord() }
+    }
+
+    private func clearPhoneAlarmRecord() {
+        phoneAlarmID = nil
+        phoneAlarmDate = nil
+        schedulingPhoneAlarm = false
+        UserDefaults.standard.removeObject(forKey: phoneAlarmIDKey)
+        UserDefaults.standard.removeObject(forKey: phoneAlarmDateKey)
     }
 
     private func sendBurst() {
@@ -200,6 +308,9 @@ final class WhoopController: NSObject, ObservableObject, CBCentralManagerDelegat
         timeoutTask = nil
         expected = nil
         ringingSince = nil
+        firstBurstConfirmed = false
+        previewActive = false
+        releaseBackgroundAllowance()
         audio?.stop()
         audio = nil
         remaining = 0
@@ -352,6 +463,10 @@ final class WhoopController: NSObject, ObservableObject, CBCentralManagerDelegat
             }
             timeoutTask?.cancel()
             expected = nil
+            if activity == .vibrating && !firstBurstConfirmed {
+                firstBurstConfirmed = true
+                _ = cancelPhoneAlarm()
+            }
         }
     }
 

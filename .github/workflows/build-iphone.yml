@@ -8,10 +8,14 @@ permissions:
 
 jobs:
   iphone:
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@v6
+      - name: Check Apple toolchain
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
       - name: Verify captured frames and timer timing
         run: |
           swiftc ios/WhoopTimer/Puffin.swift ios/WhoopTimer/TimerStart.swift ios/ProtocolTests/main.swift -o "$RUNNER_TEMP/puffin-tests"
@@ -28,6 +32,8 @@ jobs:
           test -s "$app/Assets.car"
           test -s "$app/Sounds/Native Burst.wav"
           /usr/libexec/PlistBuddy -c 'Print :NSBluetoothAlwaysUsageDescription' "$app/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Print :NSAlarmKitUsageDescription' "$app/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Print :UIBackgroundModes:0' "$app/Info.plist" | grep -qx bluetooth-central
           /usr/libexec/PlistBuddy -c 'Print :CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconName' "$app/Info.plist"
           mkdir -p "$RUNNER_TEMP/ipa/Payload"
           payload="$RUNNER_TEMP/ipa/Payload/WhoopTimer.app"
