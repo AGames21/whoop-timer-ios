@@ -1,16 +1,16 @@
 # WHOOP Timer for iPhone
 
-A companion for a WHOOP 5.0 already connected to the iPhone. Set a countdown, choose how long the strap should repeat short pulses, adjust the spacing, and stop at any time. Requires iOS 17 or newer.
+A companion for a WHOOP 5.0 already connected to the iPhone. Start after a countdown or at a selected local date and time, choose how long the strap should repeat short pulses, and stop at any time. Requires iOS 17 or newer.
 
 ## First device test
 
 1. Confirm the official WHOOP app can sync. Leave the Windows controller disconnected.
 2. Open WHOOP Timer, allow Bluetooth access, and select your WHOOP. The companion looks for the device already connected to iOS. If none is listed, open the official app, let it connect, then return and tap **Refresh**.
 3. Tap **Test Vibration**, confirm one pulse, and tap **I felt it** if you feel the buzz. If iOS presents a new system pairing prompt, cancel it and disconnect.
-4. Use **Start Timer** while keeping WHOOP Timer on screen. Closing or switching away from the app cancels the run and releases its local connection. The system display stays awake during a run.
+4. Choose **Countdown** and **Start Timer**, or choose **At a time**, select a date and time, and tap **Arm Alarm**. Keep WHOOP Timer on screen until it finishes. The system display stays awake while the timer is armed or running. Locking the phone or switching away cancels the timer and releases its local connection.
 5. After the test, confirm the official WHOOP app still syncs.
 
-The Swift protocol implementation uses the same one-shot command as the Windows app and waits for a matching final reply before sending another pulse. iPhone Bluetooth behavior and coexistence with the official app still need a device test. Scheduling overnight with the iPhone locked is outside this version.
+The Swift protocol implementation uses the same one-shot command as the Windows app and waits for a matching final reply before sending another pulse. Start with 1.5-second spacing. If the strap declines a faster pulse with status 0, the timer switches to 1.5-second spacing for the rest of that run. A further refusal stops the timer and keeps the connection. iPhone scheduling with the phone locked is outside this version.
 
 ## Build and install
 

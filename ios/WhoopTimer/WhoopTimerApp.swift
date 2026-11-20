@@ -13,8 +13,12 @@ struct WhoopTimerApp: App {
 
 @MainActor
 struct TimerView: View {
+    private enum StartMode: Hashable { case countdown, scheduled }
+
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var whoop = WhoopController()
+    @State private var startMode = StartMode.countdown
+    @State private var startTime = Date.now.addingTimeInterval(300)
     @State private var delay = "30"
     @State private var duration = "60"
     @State private var spacing = "1.5"
@@ -23,12 +27,19 @@ struct TimerView: View {
 
     private var busy: Bool { whoop.activity != .idle }
 
-    private var configuration: (Int, Int, Double)? {
-        guard let seconds = Int(delay), (0...3600).contains(seconds),
-              let length = Int(duration), (1...300).contains(length),
+    private var configuration: (TimerStart, Int, Double)? {
+        guard let length = Int(duration), (1...300).contains(length),
               let interval = NumberFormatter.localizedNumber(from: spacing) ?? Double(spacing),
               (0.5...10).contains(interval) else { return nil }
-        return (seconds, length, interval)
+        switch startMode {
+        case .countdown:
+            guard let seconds = Int(delay), (0...3600).contains(seconds) else { return nil }
+            return (.countdown(seconds), length, interval)
+        case .scheduled:
+            let minute = Calendar.current.dateInterval(of: .minute, for: startTime)?.start ?? startTime
+            guard minute > .now else { return nil }
+            return (.at(minute), length, interval)
+        }
     }
 
     var body: some View {
@@ -66,16 +77,35 @@ struct TimerView: View {
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                             if whoop.activity != .testing {
-                                Text(String(format: "%02d:%02d", whoop.remaining / 60, whoop.remaining % 60))
+                                Text(timeRemaining)
                                     .font(.system(size: 48, weight: .semibold, design: .rounded).monospacedDigit())
                                     .accessibilityLabel("\(whoop.remaining) seconds remaining")
+                                if startMode == .scheduled && whoop.activity == .countdown {
+                                    Text(startTime, format: .dateTime.weekday(.abbreviated).month().day().hour().minute())
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
                         }
                         Button("Stop", role: .destructive) { whoop.stop() }
                     } else {
-                        LabeledContent("Countdown (s)") {
-                            TextField("30", text: $delay).keyboardType(.numberPad)
-                                .multilineTextAlignment(.trailing)
+                        Picker("Start", selection: $startMode) {
+                            Text("Countdown").tag(StartMode.countdown)
+                            Text("At a time").tag(StartMode.scheduled)
+                        }
+                        .pickerStyle(.segmented)
+                        .onChange(of: startMode) { _, mode in
+                            if mode == .scheduled && startTime <= .now {
+                                startTime = Date.now.addingTimeInterval(300)
+                            }
+                        }
+                        if startMode == .countdown {
+                            LabeledContent("Countdown (s)") {
+                                TextField("30", text: $delay).keyboardType(.numberPad)
+                                    .multilineTextAlignment(.trailing)
+                            }
+                        } else {
+                            DatePicker("Start time", selection: $startTime, displayedComponents: [.date, .hourAndMinute])
                         }
                         LabeledContent("Vibration time (s)") {
                             TextField("60", text: $duration).keyboardType(.numberPad)
@@ -86,13 +116,15 @@ struct TimerView: View {
                                 .multilineTextAlignment(.trailing)
                         }
                         if configuration == nil {
-                            Text("Enter 0–3600 s to start, 1–300 s of vibration, and 0.5–10 s between pulses.")
+                            Text(startMode == .scheduled
+                                 ? "Choose a future start time, 1–300 s of vibration, and 0.5–10 s between pulses."
+                                 : "Enter 0–3600 s to start, 1–300 s of vibration, and 0.5–10 s between pulses.")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                         }
-                        Button("Start Timer") {
-                            if let (delay, duration, spacing) = configuration {
-                                whoop.start(delay: delay, duration: duration, spacing: spacing)
+                        Button(startMode == .scheduled ? "Arm Alarm" : "Start Timer") {
+                            if let (schedule, duration, spacing) = configuration {
+                                whoop.start(schedule: schedule, duration: duration, spacing: spacing)
                             }
                         }
                         .fontWeight(.semibold)
@@ -143,6 +175,14 @@ struct TimerView: View {
         case .countdown: "Vibration starts in"
         case .vibrating: "Vibration ends in"
         }
+    }
+
+    private var timeRemaining: String {
+        let seconds = whoop.remaining
+        if seconds >= 3600 {
+            return String(format: "%d:%02d:%02d", seconds / 3600, seconds / 60 % 60, seconds % 60)
+        }
+        return String(format: "%02d:%02d", seconds / 60, seconds % 60)
     }
 }
 

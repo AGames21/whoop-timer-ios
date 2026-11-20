@@ -16,3 +16,20 @@ precondition(parser.append(Data(pending.dropFirst(10)) + damaged + success) == [
     .init(sequence: 2, status: 2), .init(sequence: 2, status: 1)
 ])
 print("WHOOP 5.0 command and response fixtures passed.")
+
+let date = Date(timeIntervalSince1970: 10_000)
+let countdown = TimerStart.countdown(30).deadline(at: date, uptime: 20)!
+precondition(countdown.remaining(at: date.addingTimeInterval(180), uptime: 35) == 15)
+let scheduled = TimerStart.at(date.addingTimeInterval(120)).deadline(at: date, uptime: 20)!
+precondition(scheduled.remaining(at: date.addingTimeInterval(119), uptime: 400) == 1)
+precondition(scheduled.remaining(at: date.addingTimeInterval(120), uptime: 401) == 0)
+precondition(TimerStart.at(date).deadline(at: date, uptime: 20) == nil)
+precondition(TimerStart.countdown(-1).deadline(at: date, uptime: 20) == nil)
+
+var cadence = PulseCadence(spacing: 0.7)
+cadence.didSend(at: 10)
+precondition(abs(cadence.nextAt - 10.7) < 0.0001)
+precondition(cadence.slowDown(afterRejectionAt: 10.1))
+precondition(cadence.spacing == 1.5 && abs(cadence.nextAt - 11.6) < 0.0001)
+precondition(!cadence.slowDown(afterRejectionAt: 11.7))
+print("Countdown, wall-clock scheduling, and rejection backoff passed.")

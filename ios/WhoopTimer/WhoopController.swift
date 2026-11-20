@@ -29,6 +29,7 @@ final class WhoopController: NSObject, ObservableObject, CBCentralManagerDelegat
     private var expected: Expected?
     private var sequence: UInt8 = 1
     private var responses = HapticResponses()
+    private var cadence: PulseCadence?
     private var clockTask: Task<Void, Never>?
     private var timeoutTask: Task<Void, Never>?
 
@@ -85,36 +86,47 @@ final class WhoopController: NSObject, ObservableObject, CBCentralManagerDelegat
         message = "Ready to run a timer."
     }
 
-    func start(delay: Int, duration: Int, spacing: Double) {
+    func start(schedule: TimerStart, duration: Int, spacing: Double) {
         guard activity == .idle, confirmed, connected, sessionReady,
-              (0...3600).contains(delay), (1...300).contains(duration), (0.5...10).contains(spacing) else {
+              (1...300).contains(duration), (0.5...10).contains(spacing) else {
             return
         }
+        let date = Date()
+        let uptime = ProcessInfo.processInfo.systemUptime
+        guard let deadline = schedule.deadline(at: date, uptime: uptime) else {
+            message = "Choose a valid countdown or a future start time."
+            return
+        }
+        let wait = deadline.remaining(at: date, uptime: uptime)
         message = ""
-        activity = delay == 0 ? .vibrating : .countdown
-        remaining = delay == 0 ? duration : delay
-        let startAt = ProcessInfo.processInfo.systemUptime + Double(delay)
-        let endAt = startAt + Double(duration)
+        cadence = PulseCadence(spacing: spacing)
+        activity = wait > 0 ? .countdown : .vibrating
+        remaining = wait > 0 ? Int(ceil(wait)) : duration
         clockTask = Task { [weak self] in
-            var nextPulse = startAt
+            var endAt: TimeInterval?
             while !Task.isCancelled {
                 guard let self else { return }
                 let now = ProcessInfo.processInfo.systemUptime
-                if now >= endAt {
+                if endAt == nil {
+                    let wait = deadline.remaining(at: Date(), uptime: now)
+                    if wait > 0 {
+                        let seconds = Int(ceil(wait))
+                        if self.remaining != seconds { self.remaining = seconds }
+                        do { try await Task.sleep(for: .seconds(min(0.25, wait))) } catch { return }
+                        continue
+                    }
+                    endAt = now + Double(duration)
+                    if self.activity != .vibrating { self.activity = .vibrating }
+                }
+                guard let endAt, now < endAt else {
                     self.finish("Timer complete.")
                     return
                 }
-                if now >= startAt {
-                    if self.activity != .vibrating { self.activity = .vibrating }
-                    let seconds = Int(ceil(endAt - now))
-                    if self.remaining != seconds { self.remaining = seconds }
-                    if now >= nextPulse && self.expected == nil {
-                        nextPulse = now + spacing
-                        self.sendPulse()
-                    }
-                } else {
-                    let seconds = Int(ceil(startAt - now))
-                    if self.remaining != seconds { self.remaining = seconds }
+                let seconds = Int(ceil(endAt - now))
+                if self.remaining != seconds { self.remaining = seconds }
+                if let nextPulse = self.cadence?.nextAt, now >= nextPulse, self.expected == nil {
+                    self.cadence?.didSend(at: now)
+                    self.sendPulse()
                 }
                 do { try await Task.sleep(for: .milliseconds(30)) } catch { return }
             }
@@ -154,6 +166,7 @@ final class WhoopController: NSObject, ObservableObject, CBCentralManagerDelegat
         clockTask = nil
         timeoutTask = nil
         expected = nil
+        cadence = nil
         remaining = 0
         activity = .idle
         message = result
@@ -275,6 +288,20 @@ final class WhoopController: NSObject, ObservableObject, CBCentralManagerDelegat
             guard expected == .pulse(reply.sequence) else { continue }
             record("Pulse \(reply.sequence) reply \(reply.status)")
             if reply.status == 2 { continue }
+            if reply.status == 0 {
+                timeoutTask?.cancel()
+                expected = nil
+                if activity == .vibrating,
+                   cadence?.slowDown(afterRejectionAt: ProcessInfo.processInfo.systemUptime) == true {
+                    message = "WHOOP declined a pulse. Slowed to one pulse every 1.5 seconds."
+                    record("Slowed to 1.5 seconds after a rejected pulse.")
+                } else {
+                    finish(activity == .testing
+                           ? "WHOOP declined the test pulse. Wait a moment before trying again."
+                           : "WHOOP declined the pulse. Try a longer pulse spacing.")
+                }
+                return
+            }
             guard reply.status == 1 else {
                 fail("WHOOP rejected the pulse (status \(reply.status)).")
                 return
