@@ -20,24 +20,15 @@ struct TimerView: View {
 
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var whoop = WhoopController()
-    @AppStorage("timerTone") private var toneName = AlarmTone.steady.rawValue
     @AppStorage("playPhoneChime") private var playSound = false
     @AppStorage("ringUntilDismissed") private var untilDismissed = true
     @AppStorage("alarmLimitMinutes") private var limit = 15
     @AppStorage("ringSeconds") private var ringSeconds = 60
     @State private var mode = StartMode.countdown
-    @State private var delay = "300"
+    @AppStorage("timerDelaySeconds") private var delay = "300"
     @State private var startTime = Date.now.addingTimeInterval(300)
-    @State private var showTest = false
-    @State private var showTones = false
     @State private var showDetails = false
-    @State private var showNativeTest = false
-    @State private var attemptedNativeTest = false
 
-    private var tone: AlarmTone {
-        let selected = AlarmTone(rawValue: toneName) ?? .steady
-        return selected == .burst && !whoop.nativeConfirmed ? .steady : selected
-    }
     private var busy: Bool { whoop.activity != .idle }
     private var schedule: TimerStart? {
         switch mode {
@@ -55,7 +46,7 @@ struct TimerView: View {
             VStack(alignment: .leading, spacing: 16) {
                 header
                 timerFace
-                if !whoop.confirmed && !busy { connection }
+                if !whoop.connected && !busy { connection }
                 if !busy {
                     startSettings
                     soundSettings
@@ -77,21 +68,11 @@ struct TimerView: View {
         .preferredColorScheme(.dark)
         .tint(accent)
         .safeAreaInset(edge: .bottom) {
-            if whoop.confirmed || busy {
+            if whoop.connected || busy {
                 actionBar
             }
         }
-        .sheet(isPresented: $showTones, onDismiss: {
-            if whoop.activity == .preview || whoop.activity == .nativeTest { whoop.stop() }
-            attemptedNativeTest = false
-        }) { tones }
         .sheet(isPresented: $showDetails) { details }
-        .alert("Send one short vibration?", isPresented: $showTest) {
-            Button("Send Test") { whoop.test() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Use the iPhone’s existing WHOOP connection. If iOS asks to pair again, cancel the prompt.")
-        }
         .onChange(of: busy) { _, active in
             UIApplication.shared.isIdleTimerDisabled = active
         }
@@ -161,8 +142,7 @@ struct TimerView: View {
     private var faceCaption: String {
         switch whoop.activity {
         case .idle: mode == .countdown ? "Countdown" : "Alarm time"
-        case .testing: "Sending"
-        case .nativeTest: "Testing strap rhythm"
+        case .preparing: "Getting your WHOOP ready"
         case .preview: "Previewing"
         case .countdown: "Alarm starts in"
         case .vibrating: untilDismissed ? "Maximum time left" : "Vibration ends in"
@@ -172,22 +152,15 @@ struct TimerView: View {
     private var faceValue: String {
         switch whoop.activity {
         case .idle: mode == .countdown ? timeString(Int(delay) ?? 0) : startTime.formatted(date: .omitted, time: .shortened)
-        case .testing: "Test pulse"
-        case .nativeTest: "Native Burst"
-        case .preview: tone.rawValue
+        case .preparing, .preview: "Native Burst"
         case .countdown, .vibrating: timeString(whoop.remaining)
         }
     }
 
     private var connection: some View {
         VStack(alignment: .leading, spacing: 11) {
-            Text(whoop.connected ? "Set up vibration" : "Connect your strap").font(.headline)
-            if whoop.connected {
-                Button(whoop.testAcknowledged ? "I felt it" : "Test Vibration") {
-                    if whoop.testAcknowledged { whoop.confirmVibration() } else { showTest = true }
-                }
-                .buttonStyle(TimerFilledButton(fill: accent))
-            } else if whoop.connecting {
+            Text("WHOOP connection").font(.headline)
+            if whoop.connecting {
                 ProgressView("Connecting…")
             } else if whoop.devices.isEmpty {
                 Text("Let the official WHOOP app sync, then refresh here.")
@@ -248,20 +221,22 @@ struct TimerView: View {
     }
 
     private var soundSettings: some View {
-        Button { showTones = true } label: {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 12) {
                 Image(systemName: "waveform").foregroundStyle(accent)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Ringtone").font(.headline)
-                    Text(tone.rawValue + (playSound ? " · Wrist + iPhone" : " · Wrist only"))
-                        .font(.subheadline).foregroundStyle(.secondary)
+                    Text("Native Burst").font(.headline)
+                    Text("Quick pulses timed by your WHOOP").font(.footnote).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Image(systemName: "chevron.right").foregroundStyle(.secondary)
+                Button("Preview") { whoop.preview(playSound: playSound) }
+                    .buttonStyle(.bordered)
+                    .disabled(!whoop.connected)
             }
-            .panel()
+            Toggle("Also play sound on iPhone", isOn: $playSound)
+                .font(.subheadline)
         }
-        .buttonStyle(.plain)
+        .panel()
     }
 
     private var dismissalSettings: some View {
@@ -273,7 +248,7 @@ struct TimerView: View {
                 }
                 Text(whoop.tapVerified
                      ? "Double-tap detected on this connection."
-                     : "Double-tap dismissal needs a strap test. Stop on screen is always available.")
+                     : "Try double-tapping your WHOOP while it rings, or tap Stop.")
                     .font(.footnote).foregroundStyle(.secondary)
             } else {
                 Picker("Ring for", selection: $ringSeconds) {
@@ -294,7 +269,7 @@ struct TimerView: View {
                     whoop.stop()
                 } else if let schedule {
                     whoop.start(schedule: schedule, duration: untilDismissed ? limit * 60 : ringSeconds,
-                                tone: tone, playSound: playSound)
+                                playSound: playSound)
                 }
             } label: {
                 Text(busy ? "Stop" : mode == .countdown ? "Start Timer" : "Arm Alarm")
@@ -312,66 +287,6 @@ struct TimerView: View {
         .background(.regularMaterial)
     }
 
-    private var tones: some View {
-        NavigationStack {
-            List {
-                Section {
-                    ForEach(AlarmTone.allCases) { candidate in
-                        Button {
-                            if candidate == .burst && !whoop.nativeConfirmed {
-                                showNativeTest = true
-                            } else {
-                                toneName = candidate.rawValue
-                                whoop.preview(candidate, playSound: playSound)
-                            }
-                        } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(candidate.rawValue).font(.headline).foregroundStyle(.primary)
-                                    Text(candidate.detail).font(.subheadline).foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                if candidate == tone { Image(systemName: "checkmark.circle.fill") }
-                            }
-                        }
-                        .disabled(busy || (candidate == .burst && !whoop.confirmed))
-                    }
-                    if whoop.nativeAcknowledged && !whoop.nativeConfirmed {
-                        Button("I felt a quick burst") {
-                            whoop.confirmNativeBurst()
-                            toneName = AlarmTone.burst.rawValue
-                        }
-                    }
-                } footer: {
-                    Text(whoop.confirmed ? "Tap a ringtone to feel a short preview." : "Connect and test your WHOOP to preview ringtones.")
-                }
-                if attemptedNativeTest && !whoop.message.isEmpty {
-                    Text(whoop.message).font(.footnote).foregroundStyle(.secondary)
-                }
-                Toggle("Also play sound on iPhone", isOn: $playSound)
-                    .disabled(busy)
-                if whoop.activity == .preview {
-                    Button("Stop Preview", role: .destructive) { whoop.stop() }
-                }
-            }
-            .navigationTitle("Ringtones")
-            .alert("Test one native burst?", isPresented: $showNativeTest) {
-                Button("Send Test Burst") {
-                    attemptedNativeTest = true
-                    whoop.testNativeBurst()
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("One Bluetooth command asks the strap to repeat its usual vibration quickly. Confirm it only if you feel several pulses.")
-            }
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { showTones = false }
-                }
-            }
-        }
-    }
-
     private var details: some View {
         NavigationStack {
             List {
@@ -382,7 +297,7 @@ struct TimerView: View {
                     }
                     Text(whoop.tapVerified ? "Double-tap detected"
                          : whoop.listensForTap ? "Listening for double-taps. Tap your WHOOP twice to check."
-                         : whoop.connected ? "No double-tap notifications on this connection."
+                         : whoop.connected ? "Double-tap listening starts with a preview or alarm."
                          : "Connect to check double-tap notifications.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }

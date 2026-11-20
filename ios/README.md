@@ -5,16 +5,13 @@ A companion for a WHOOP 5.0 already connected to the iPhone. Start after a count
 ## First device test
 
 1. Confirm the official WHOOP app can sync. Leave the Windows controller disconnected.
-2. Open WHOOP Timer, allow Bluetooth access, and select your WHOOP. The companion looks for the device already connected to iOS. If none is listed, open the official app, let it connect, then return and tap **Refresh**.
-3. Tap **Test Vibration**, confirm one pulse, and tap **I felt it** if you feel the buzz. If iOS presents a new system pairing prompt, cancel it and disconnect.
-4. Choose a countdown preset or enter custom seconds, then tap **Start Timer**. For a scheduled alarm, choose **At a time**, select a date and time, and tap **Arm Alarm**. The display stays awake while the timer is armed or running. Locking the phone or switching away cancels it.
-5. Tap **Ringtone** to choose and preview Steady, Double, or Swell. Each uses a different wrist cadence. **Also play sound on iPhone** adds the matching chime through the phone when sound is on.
-6. In **Ring until dismissed** mode, the app repeats until it sees a live double-tap, you tap **Stop**, the connection is lost, or its selected maximum runtime is reached. To check for tap support, open **Strap** after testing vibration, double-tap the top of the sensor, and look for **Double-tap detected**. Double-tap dismissal on the target sensor has yet to be verified.
-7. After testing, check that the official WHOOP app still syncs.
+2. Open WHOOP Timer and allow Bluetooth access. It automatically connects to the remembered WHOOP already connected to iOS, or to the only currently connected WHOOP on first use. If no strap appears, let the official app connect and then return to WHOOP Timer. When the choice is ambiguous, select your strap in the connection panel. If iOS presents a new system pairing prompt, cancel it.
+3. Tap **Start Timer** to reuse your last countdown, choose a preset, or enter custom seconds. To arm a scheduled alarm, choose **At a time**, select a date and time, and tap **Arm Alarm**. The display stays awake while the timer is armed or running. Locking the phone or switching away cancels it.
+4. **Native Burst** is the default wrist vibration. **Preview** sends one optional burst. **Also play sound on iPhone** adds the matching chime through the phone when sound is on.
+5. In **Ring until dismissed** mode, the app repeats until it sees a live double-tap, you tap **Stop**, the connection is lost, or its selected maximum runtime is reached. To check for tap support, use **Preview**, open **Strap**, double-tap the top of the sensor, and look for **Double-tap detected**. Double-tap dismissal on the target sensor has yet to be verified.
+6. After testing, check that the official WHOOP app still syncs.
 
-**Native Burst** asks the strap to repeat its own waveform within a single Bluetooth command. It uses the documented Maverick repeat field and the same waveform as the regular pulse. It does not set a higher motor intensity. The first test requests one short burst. Select it for a run only if you feel several quick pulses and tap **I felt a quick burst**. Confirm it again after disconnecting and reconnecting.
-
-The iPhone companion attaches to the existing iOS connection. The WHOOP app and the timer have separate purposes, and coexistence during a run still needs a target-device check. The Swift protocol sends the verified one-shot command and waits for a final reply before the next pulse. If the strap declines a fast pulse, the timer enforces at least 1.5 seconds between pulses for the rest of that run. A further refusal stops the timer and retains the connection. The app listens for fresh strap tap events through the WHOOP notification characteristic.
+The iPhone companion attaches to the existing iOS connection. It opens the vibration session only when a preview or alarm is due. Native Burst uses the Maverick repeat field with the waveform the user confirmed on their WHOOP. It waits for a final reply and leaves at least three seconds between burst commands. A refusal stops the timer and retains the connection. The app listens for fresh strap tap events through the WHOOP notification characteristic.
 
 ## Build and install
 

@@ -8,6 +8,7 @@ enum Puffin {
     static let hello = Data([0xaa, 1, 8, 0, 0, 1, 0xe6, 0x71,
                              0x23, 1, 0x91, 1, 0x36, 0x3e, 0x5c, 0x8d])
     static let haptic: UInt8 = 0x13
+    static let nativeBurstSpacing: TimeInterval = 3
 
     static func buzz(sequence: UInt8, nativeBurst: Bool = false) -> Data {
         // The last body byte requests repeat effects on the strap. The second byte here is frame padding.
